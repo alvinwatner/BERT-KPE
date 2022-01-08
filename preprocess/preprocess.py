@@ -12,10 +12,14 @@ import unicodedata
 import numpy as np
 from tqdm import tqdm
 import prepro_utils
+import nltk
+from nltk.tokenize import RegexpTokenizer
+
 
 dataset_dict = {
     "openkp": [("EvalPublic", "eval"), ("Dev", "dev"), ("Train", "train")],
     "kp20k": [("testing", "eval"), ("validation", "dev"), ("training", "train")],
+    "squadkp": [("test", "eval"), ("val", "dev"), ("train", "train")]
 }
 
 logger = logging.getLogger()
@@ -27,7 +31,7 @@ def add_preprocess_opts(parser):
     parser.add_argument(
         "--dataset_class",
         type=str,
-        choices=["openkp", "kp20k"],
+        choices=["openkp", "kp20k", "squadkp"],
         help="Select dataset to be preprocessed. ",
     )
     parser.add_argument(
@@ -80,6 +84,8 @@ def set_logger(log_file):
     fmt = logging.Formatter("%(asctime)s: [ %(message)s ]", "%m/%d/%Y %I:%M:%S %p")
     console = logging.StreamHandler()
     console.setFormatter(fmt)
+    console.setLevel(logging.INFO)
+    logger.addHandler(console)
 
     logfile = logging.FileHandler(log_file, "w")
     logfile.setFormatter(fmt)
@@ -100,6 +106,7 @@ def openkp_loader(mode, source_dataset_dir):
         for idx, line in enumerate(tqdm(corpus_file)):
             json_ = json.loads(line)
             data_pairs.append(json_)
+            break
     return data_pairs
 
 
@@ -129,6 +136,22 @@ def kp20k_loader(
     return data_pairs
 
 
+def squadkp_loader(mode, source_dataset_dir):
+
+    logger.info("start loading %s data ..." % mode)
+    source_path = os.path.join(source_dataset_dir, "squadkp_qg_%s.json" % mode)
+
+    data_pairs = []
+    with open(source_path, "r") as f:
+        a = json.load(f)
+        for idx, line in enumerate(tqdm(a)):
+            pair = {'source_input' : line['source_input'],
+                    'alpha_words' : line['alpha_words']}
+            data_pairs.append(pair)
+
+    return data_pairs
+
+
 # -------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------
 # first stage preprocess
@@ -152,7 +175,7 @@ def openkp_refactor(examples, mode):
         if have_phrase:
             keyphrases = prepro_utils.clean_phrase(ex["KeyPhrases"])
             data["keyphrases"] = keyphrases
-
+        
         return_pairs.append(data)
     return return_pairs
 
@@ -263,6 +286,21 @@ def kp20k_refactor(src_trgs_pairs, mode, valid_check=True):
 
     return return_pairs
 
+def squadkp_refactor(examples, mode):
+    logger.info("start refactor squadkp %s data ..." % mode)
+    
+    return_pairs = []
+    
+    tokenizer = RegexpTokenizer(r'\w+')
+    for idx, ex in tqdm(enumerate(examples)):
+        keyphrases_tokens = list([word] for word in ex['alpha_words'].strip().split()) 
+        src_tokens = tokenizer.tokenize(ex['source_input'])
+        data = {'doc_words' : src_tokens,
+                'keyphrases' : keyphrases_tokens}
+        return_pairs.append(data)
+
+    return return_pairs
+    
 
 # -------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------
@@ -295,45 +333,10 @@ def filter_openkp_absent(examples):
         data["present_keyphrases"] = present_phrases["keyphrases"]
         data_list.append(data)
 
-    logger.info("Null : number = {} , URL = {} ".format(len(null_urls), null_urls))
-    logger.info(
-        "Absent : number = {} , URL = {} ".format(len(absent_urls), absent_urls)
-    )
+    logger.info('Null : number = {} , URL = {} '.format(len(null_urls), null_urls))
+    logger.info('Absent : number = {} , URL = {} '.format(len(absent_urls), absent_urls))
+     
     return data_list
-
-
-def filter_kp20k_absent(examples):
-    logger.info("strat filter absent keyphrases for KP20k...")
-    data_list = []
-
-    null_ids, absent_ids = 0, 0
-
-    url = 0
-    for idx, ex in enumerate(tqdm(examples)):
-
-        lower_words = [t.lower() for t in ex["doc_words"]]
-        present_phrases = prepro_utils.find_stem_answer(
-            word_list=lower_words, ans_list=ex["keyphrases"]
-        )
-        if present_phrases is None:
-            null_ids += 1
-            continue
-        if len(present_phrases["keyphrases"]) != len(ex["keyphrases"]):
-            absent_ids += 1
-
-        data = {}
-        data["url"] = url
-        data["doc_words"] = ex["doc_words"]
-        data["keyphrases"] = present_phrases["keyphrases"]
-        data["start_end_pos"] = present_phrases["start_end_pos"]
-
-        data_list.append(data)
-        url += 1
-
-    logger.info("Null : number = {} ".format(null_ids))
-    logger.info("Absent : number = {} ".format(absent_ids))
-    return data_list
-
 
 # -------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------
@@ -411,9 +414,12 @@ def main_preprocess(opt, input_mode, save_mode):
 if __name__ == "__main__":
 
     # preprocess selector
-    data_loader = {"openkp": openkp_loader, "kp20k": kp20k_loader}
-    data_refactor = {"openkp": openkp_refactor, "kp20k": kp20k_refactor}
-    absent_filter = {"openkp": filter_openkp_absent, "kp20k": filter_kp20k_absent}
+    data_loader = {"openkp": openkp_loader, "kp20k": kp20k_loader,
+                    "squadkp": squadkp_loader}
+    data_refactor = {"openkp": openkp_refactor, "kp20k": kp20k_refactor,
+                    "squadkp" : squadkp_refactor}
+    absent_filter = {"openkp": filter_openkp_absent, "kp20k": filter_kp20k_absent,
+                    "squadkp": filter_squadkp_absent}
 
     t0 = time.time()
     parser = argparse.ArgumentParser(

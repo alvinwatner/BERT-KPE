@@ -288,9 +288,9 @@ def kp20k_refactor(src_trgs_pairs, mode, valid_check=True):
 
 def squadkp_refactor(examples, mode):
     logger.info("start refactor squadkp %s data ..." % mode)
-    
+
     return_pairs = []
-    
+
     tokenizer = RegexpTokenizer(r'\w+')
     for idx, ex in tqdm(enumerate(examples)):
         keyphrases_tokens = list([word] for word in ex['alpha_words'].strip().split()) 
@@ -300,6 +300,7 @@ def squadkp_refactor(examples, mode):
         return_pairs.append(data)
 
     return return_pairs
+
     
 
 # -------------------------------------------------------------------------------------
@@ -332,7 +333,70 @@ def filter_openkp_absent(examples):
         data["start_end_pos"] = present_phrases["start_end_pos"]
         data["present_keyphrases"] = present_phrases["keyphrases"]
         data_list.append(data)
+    
+    logger.info("Null : number = {} , URL = {} ".format(len(null_urls), null_urls))
+    logger.info(
+        "Absent : number = {} , URL = {} ".format(len(absent_urls), absent_urls)
+    )
+    return data_list
 
+
+def filter_kp20k_absent(examples):
+    logger.info("strat filter absent keyphrases for KP20k...")
+    data_list = []
+
+    null_ids, absent_ids = 0, 0
+
+    url = 0
+    for idx, ex in enumerate(tqdm(examples)):
+
+        lower_words = [t.lower() for t in ex["doc_words"]]
+        present_phrases = prepro_utils.find_stem_answer(
+            word_list=lower_words, ans_list=ex["keyphrases"]
+        )
+        if present_phrases is None:
+            null_ids += 1
+            continue
+        if len(present_phrases["keyphrases"]) != len(ex["keyphrases"]):
+            absent_ids += 1
+
+        data = {}
+        data["url"] = url
+        data["doc_words"] = ex["doc_words"]
+        data["keyphrases"] = present_phrases["keyphrases"]
+        data["start_end_pos"] = present_phrases["start_end_pos"]
+
+        data_list.append(data)
+        url += 1
+
+    logger.info("Null : number = {} ".format(null_ids))
+    logger.info("Absent : number = {} ".format(absent_ids))
+    return data_list
+
+
+def filter_squadkp_absent(examples):
+    logger.info('Start filter absent keyphrases ...')
+    url = 0
+    data_list = []
+    null_urls, absent_urls = [], []
+    for idx, ex in enumerate(tqdm(examples)):
+        present_phrases = prepro_utils.find_answer(document = ex['doc_words'], 
+                answers = ex['keyphrases'])
+        if present_phrases is None:
+            null_urls.append(url) 
+            continue
+        if len(present_phrases['keyphrases']) != len(ex['keyphrases']):
+            absent_urls.append(url)
+
+        data = {}
+        data['doc_words'] = ex['doc_words']
+        data['keyphrases'] = present_phrases['keyphrases']
+        data['start_end_pos'] = present_phrases['start_end_pos']
+        data['all_keyphrases'] = ex['keyphrases']
+        data['url'] = url
+        data_list.append(data)
+        url += 1
+    
     logger.info('Null : number = {} , URL = {} '.format(len(null_urls), null_urls))
     logger.info('Absent : number = {} , URL = {} '.format(len(absent_urls), absent_urls))
      
